@@ -1,0 +1,235 @@
+# # Auto generated migration workflow
+# # Updated: 2026-03-10T07:13:26.192Z
+
+# name: Code Migration
+
+# on:
+#   push:
+#     branches:
+#       - main
+
+# permissions:
+#   contents: write
+#   pull-requests: write
+
+# concurrency:
+#   group: migration-${{ github.run_id }}
+#   cancel-in-progress: true
+
+# env:
+#   SOURCE_LANGUAGE: Ruby
+#   TARGET_LANGUAGE: Python
+#   TARGET_BRANCH: python
+#   CREATE_PR: {{CREATE_PR}}
+
+# jobs:
+#   migrate:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout source branch
+#         uses: actions/checkout@v4
+#         with:
+#           fetch-depth: 0
+#           token: ${{ secrets.GITHUB_TOKEN }}
+
+#       - name: Setup Python
+#         uses: actions/setup-python@v5
+#         with:
+#           python-version: "3.11"
+
+#       - name: Install Python dependencies
+#         run: pip install requests
+
+#       - name: Fetch GROQ API key from backend
+#         run: |
+#           echo "Fetching GROQ API key from backend..."
+
+#           HTTP_STATUS=$(curl -s -o /tmp/secret_response.txt -w "%{http_code}" \
+#             --max-time 10 \
+#             "https://codegenx.phylon.in/api/secrets/ci?migration_id=${{ github.run_id }}")
+
+#           KEY=$(cat /tmp/secret_response.txt)
+
+#           echo "Backend HTTP status: $HTTP_STATUS"
+
+#           # Detect non-200 HTTP status
+#           if [[ "$HTTP_STATUS" != "200" ]]; then
+#             echo "[ERROR] Backend returned HTTP $HTTP_STATUS instead of 200."
+#             echo "[DEBUG] Response body: $KEY"
+#             exit 1
+#           fi
+
+#           # Detect empty response
+#           if [ -z "$KEY" ]; then
+#             echo "[ERROR] Backend returned an empty response."
+#             exit 1
+#           fi
+
+#           # Detect HTML response (404 page, redirect, or catch-all frontend route)
+#           if [[ "$KEY" == "<"* ]]; then
+#             echo "[WARNING] Backend returned HTML instead of the API key."
+#           fi
+
+#           # Mask the key so it never appears in plain text in the logs
+#           echo "::add-mask::$KEY"
+
+#           echo "GROQ_API_KEY=$KEY" >> $GITHUB_ENV
+#           echo "[INFO] GROQ API key retrieved successfully."
+
+#       - name: Run migration script
+#         run: |
+#           set -e
+#           if [ -f "scripts/migrate.py" ]; then
+#             python scripts/migrate.py
+#           elif [ -f "scripts/script.py" ]; then
+#             python scripts/script.py
+#           else
+#             echo "[ERROR] No migration script found"
+#             exit 1
+#           fi
+
+#       - name: Commit and push converted files to target branch
+#         run: |
+#           git config --global user.email "migration-bot@codegenx.io"
+#           git config --global user.name "CodeGenX Migration Bot"
+
+#           TARGET="${{ env.TARGET_BRANCH }}"
+
+#           # Create or reset the target branch
+#           git fetch origin "$TARGET" || true
+#           git checkout -B "$TARGET" origin/"$TARGET" 2>/dev/null || git checkout -B "$TARGET"
+
+#           # Copy converted output into target branch
+#           if [ -d "converted-code" ]; then
+#             cp -r converted-code/* . 2>/dev/null || true
+#           fi
+
+#           git add -A
+#           git diff --cached --quiet && echo "[INFO] No changes to commit" && exit 0
+
+#           git commit -m "[MIGRATION] Converted code pushed to $TARGET"
+#           git push origin "$TARGET" --force
+
+#           echo "[SUCCESS] Migration completed and pushed to $TARGET"
+
+#       - name: Create or reuse Pull Request
+#         env:
+#           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#         run: |
+#           if [ "$CREATE_PR" = "true" ]; then
+#             HEAD_BRANCH="${{ env.TARGET_BRANCH }}"
+#             BASE_BRANCH="${{ github.ref_name }}"
+#             REPO="${{ github.repository }}"
+
+#             EXISTING_PR=$(gh pr list \
+#               --repo "$REPO" \
+#               --head "$HEAD_BRANCH" \
+#               --base "$BASE_BRANCH" \
+#               --state open \
+#               --json number \
+#               --jq '.[0].number // empty')
+
+#             if [ -n "$EXISTING_PR" ]; then
+#               echo "[GitHub] PR already exists: #${EXISTING_PR} — reusing existing pull request"
+#             else
+#               echo "[GitHub] Creating new pull request..."
+#               gh pr create \
+#                 --repo "$REPO" \
+#                 --head "$HEAD_BRANCH" \
+#                 --base "$BASE_BRANCH" \
+#                 --title "Migration: ${{ env.SOURCE_LANGUAGE }} → ${{ env.TARGET_LANGUAGE }}" \
+#                 --body "Automated code migration results. This branch contains the converted source code." \
+#                 || echo "[GitHub] PR creation skipped (may already exist)"
+#             fi
+#           else
+#             echo "[INFO] Pull request creation disabled."
+#           fi
+
+
+
+
+
+
+
+name: Code Migration
+
+on:
+  push:
+    branches:
+      - {{SOURCE_BRANCH}}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: migration-${{ github.run_id }}
+  cancel-in-progress: true
+
+env:
+  SOURCE_LANGUAGE: {{SOURCE_LANG}}
+  TARGET_LANGUAGE: {{TARGET_LANG}}
+  TARGET_BRANCH: {{TARGET_BRANCH}}
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Fetch GROQ API key
+        run: |
+          echo "Fetching GROQ API key..."
+
+          HTTP_STATUS=$(curl -s -o /tmp/key.txt -w "%{http_code}" \
+            "https://codegenx.phylon.in/api/secrets/ci?migration_id=${{ github.run_id }}")
+
+          KEY=$(cat /tmp/key.txt)
+
+          if [[ "$HTTP_STATUS" != "200" ]]; then
+            echo "Failed to retrieve API key"
+            exit 1
+          fi
+
+          echo "::add-mask::$KEY"
+          echo "GROQ_API_KEY=$KEY" >> $GITHUB_ENV
+
+          echo "[INFO] API key loaded"
+
+      - name: Run migration script
+        run: python scripts/migrate.py
+
+      - name: Commit converted code
+        run: |
+          git config user.name "codegenx-bot"
+          git config user.email "bot@codegenx.ai"
+
+          TARGET="${{ env.TARGET_BRANCH }}"
+
+          git checkout -B "$TARGET"
+
+          if [ -d "converted-code" ]; then
+            cp -r converted-code/* .
+          fi
+
+          git add .
+
+          if git diff --cached --quiet; then
+            echo "No changes"
+            exit 0
+          fi
+
+          git commit -m "Code migration result"
+          git push origin "$TARGET" --force
